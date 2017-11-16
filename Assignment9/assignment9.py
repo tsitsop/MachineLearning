@@ -7,11 +7,6 @@ import time
 import math
 from scipy.integrate import quad
 
-# formula used to map w to xspace
-def formula(w, x):
-	return ((-w[1]/w[2]) * x - (w[0]/w[2]))
-
-
 # read data from the file
 def get_input(filename):
     f = open(filename)
@@ -21,7 +16,7 @@ def get_input(filename):
 
     del parsedStringData[-1]
 
-    parsedData = map(float, parsedStringData)
+    parsedData = list(map(float, parsedStringData))
 
     return parsedData
 
@@ -145,6 +140,7 @@ def create_data(input):
         
     return data
 
+
 # data in form [x, y] where x = [1, intensity, symmetry]
 def normalize_data(data):
     min_intensity = min(a[1] for (a,b) in data)
@@ -163,14 +159,14 @@ def normalize_data(data):
         data[i][0][2] =\
             2. * (symmetry - min_symmetry) / (max_symmetry - min_symmetry) - 1
 
-        if (data[i][1] == 1.):
-            plt.plot(data[i][0][1], data[i][0][2], 'bo', mew=3, ms=10, fillstyle='none', markeredgecolor='blue')
-        else:
-            plt.plot(data[i][0][1], data[i][0][2], 'rx', mew=3, ms=10)
+        # if (data[i][1] == 1.):
+        #     plt.plot(data[i][0][1], data[i][0][2], 'bo', mew=2, ms=10, fillstyle='none', markeredgecolor='blue')
+        # else:
+        #     plt.plot(data[i][0][1], data[i][0][2], 'rx', mew=2, ms=10)
 
 
-# computes legendre transform of (x)^k
-def legendre_transform(x, k):
+# computes legendre transform of x^k
+def lt(x, k):
     # base cases
     if (k == 0):
         return 1
@@ -178,95 +174,263 @@ def legendre_transform(x, k):
         return x
 
     # recursive step
-    first_term = ((2.0*k - 1.0) / k) * legendre_transform(x, k-1)
-    second_term = ((k - 1.0)/k) * legendre_transform(x, k-2)
+    first_term = ((2.0*k - 1.0) / k)*x * lt(x, k-1)
+    second_term = ((k - 1.0)/k) * lt(x, k-2)
     
     return first_term - second_term 
 
+
 # linear regression with decay. l is lambda
 def linear_regression(data, n, l):
-    x_a = np.zeros(shape=(n,3))
+    x_a = np.zeros(shape=(n,len(data[0][0])))
     y_a = np.zeros(shape=(n,1))
 
     for i in range(n):
         x_a[i] = data[i][0]
         y_a[i] = data[i][1]
         
-    x = np.asmatrix(x_a)
+    z = np.asmatrix(x_a)
     y = np.asmatrix(y_a)
 
-    x_transpose = x.transpose() 
+    z_transpose = z.transpose()
 
-    # modified to add lambda
-    psuedo_inverse_x = np.linalg.inv(x_transpose * x + l*np.identity(3)) * x_transpose
+    li = l * np.identity(len(data[0][0]))
+    
+    inv = np.linalg.inv((z_transpose * z) + li)
 
-    opt = psuedo_inverse_x * y
+    opt = inv * z_transpose * y
 
     opt_array = np.squeeze(np.asarray(opt))
 
     return opt_array
 
-def polynomial_transform(point, degree_transform):
-    new_point = [1]
+
+# polynomial feature transform
+def polynomial_transform(point, degree):
+    transformed_point = list()
     x1 = point[1]
     x2 = point[2]
 
-    # keeps track of the previous degree transform's values added
-    prev_degree = new_point
-    # keeps track of the current degree transform's values added
-    cur_degree = list()
+    for i in range(degree+1):
+        for j in range(i+1):
+            transformed_point.append(x1**(i-j)*x2**j)
 
-    # need to do this for each degree transform
-    for i in range(1, degree_transform+1):
-        # need to iterate over all the values added in the previous degree
-        for j in range(len(prev_degree)):
-            # append all updated values from previous degree 
-            cur_degree.append(prev_degree[j] * x1)
-        # need to also add updated final value with x2
+    return transformed_point
+
+
+# legendre feature transform
+def legendre_transform(point, degree):
+    transformed_point = list()
+    x1 = point[1]
+    x2 = point[2]
+
+    for i in range(degree+1):
+        for j in range(i+1):
+            transformed_point.append(lt(x1, i-j)*lt(x2,j))
+
+    return transformed_point
+
+
+def get_cv_error(data, l, g):
+    n = len(data)
+    
+    x_a = np.zeros(shape=(n,len(data[0][0])))
+    y_a = np.zeros(shape=(n,1))
+    g = np.array(g)
+
+    for i in range(n):
+        x_a[i] = data[i][0]
+        y_a[i] = data[i][1]
         
-        cur_degree.append(prev_degree[-1]*x2)
-        # add all values we just created in cur_degree to new point
-        new_point += cur_degree
+    z = np.asmatrix(x_a)
+    y = np.asmatrix(y_a)
 
-        prev_degree = cur_degree[:]
-        cur_degree[:] = []
+    z_transpose = z.transpose()
 
-    print new_point
+    li = l * np.identity(len(g))
+    
+    inv = np.linalg.inv((z_transpose * z) + li)
+    
+    H = z * inv * z_transpose
+
+    y_hat = H * y
+
+    total_error = 0.0
+    for i in range(n):
+        diff = y_hat[i] - y[i]
+        
+        err = (diff / (1.0 - H.item(i,i)))
+        
+        squared_err = err.item(0)**2
+        
+        total_error += squared_err
+
+    return total_error/float(n)
+
+
+def get_test_error(test_data, w):
+    total_error = 0.0
+    n = len(test_data)
+
+    x_a = np.zeros(shape=(n,len(test_data[0][0])))
+    y_a = np.zeros(shape=(n,1))
+
+    for i in range(n):
+        x_a[i] = test_data[i][0]
+        y_a[i] = test_data[i][1]
+        
+    x = np.asmatrix(x_a)
+    y = np.asmatrix(y_a)
+    w = np.asmatrix(w).transpose()
+
+    y_hat = x*w
+
+    for i in range(n):
+        err = (y_hat.item(i) - y.item(i))**2
+        total_error += err
+    
+    return total_error/n
+
+
+# determine if point classified correctly
+def goodH(w, point):
+    result = np.dot(w, point[0])
+
+    if (np.sign(result) == np.sign(point[1])):
+        return True
+
+    return False
+
+
+# get the number of misclassified points
+def get_misclassified(w, data, n):
+    err_count = 0
+
+    # for each point in the data set, check if point misclassified
+    for i in range(n):
+        # if point misclassified, increment error count
+        if (goodH(w, data[i]) == False):
+            err_count += 1
+
+    return err_count
 
 
 if __name__ == '__main__':
-    # # indicates which polynomial transform using
-    # degree_transform = 1
-
-    #  # get all data from files
-    # train = get_input('ZipDigits.train')
-    # test = get_input('ZipDigits.test')
-    # combined = train+test
+     # get all data from files
+    train = get_input('ZipDigits.train')
+    test = get_input('ZipDigits.test')
+    combined = train+test
     
-    # # clean the input to organize structure
-    # cleaned_input = clean_input(combined)
+    # clean the input to organize structure
+    cleaned_input = clean_input(combined)
 
-    # # get data to be in terms of intensity and symmetries
-    # data = create_data(cleaned_input)
+    # get data to be in terms of intensity and symmetries
+    data = create_data(cleaned_input)
 
-    # # normalize data
-    # normalize_data(data)
+    # normalize ALL data
+    normalize_data(data)
     
-    # # split into training and test sets
-    # random.shuffle(data)
-    # training_data = data[:300]
-    # testing_data = data[300:]
+    # split into training and test sets
+    random.shuffle(data)
+    training_data = data[:300]
+    testing_data = data[300:]
 
-    # # don't need Legendre right now because in 2d
+    # transform ALL data to degree order legendre transform
+    degree = 8
+    transformed_data = list()
+    transformed_test_data = list()
+    for i in range(len(training_data)):
+        transformed_data.append((np.array(legendre_transform(training_data[i][0], degree)), training_data[i][1]))
+        
+    for i in range(len(testing_data)):
+        transformed_test_data.append((np.array(legendre_transform(testing_data[i][0], degree)), testing_data[i][1]))
 
 
-    # # calculate decayed linear regression weights, where l = lambda
-    # l = 0
-    # w = linear_regression(training_data, len(training_data), l)
+    ############### Compute Regression Weights ###############
+
+    # we have 200 different lambdas to try so 200 models
+    models = [None]*201
+    cv_errors = [0.]*201
+    test_errors = [0.]*201
+    min_index = 0
+
+    for i in range(201):
+        l = i/100.
+        g = linear_regression(transformed_data, len(transformed_data), l)
+        models[i] = (g, l)
+        cv_errors[i] = get_cv_error(transformed_data, l, g)
+        test_errors[i] = get_test_error(transformed_test_data, g)
+
+        if cv_errors[i] < cv_errors[min_index]:
+            min_index = i
+
+    # get index of smallest cv_error (best model)
+    # min_index = np.argmin(cv_errors)
+    opt_model = models[min_index]
+
+    # calculate classification error
+    e_test = float(get_misclassified(opt_model[0], transformed_test_data, len(transformed_test_data)))  / len(transformed_test_data)
+    error_bar_test = math.sqrt(1./(2*len(transformed_test_data)) * np.log(2./0.05))
+    e_out = e_test + error_bar_test
+
+    ############### Plot Data ###############
+
+    # plot stuff
+    x1 = np.linspace(-1.5, 1.5, 100)
+    x2 = np.linspace(-1.5, 1.5, 100)
+    x1, x2 = np.meshgrid(x1, x2)
+
+    # plot line weights when lambda = 0
+    for i in range(len(training_data)):
+        if (training_data[i][1] == 1.):
+            plt.plot(training_data[i][0][1], training_data[i][0][2], 'bo', mew=2, ms=10, fillstyle='none', markeredgecolor='blue')
+        else:
+            plt.plot(training_data[i][0][1], training_data[i][0][2], 'rx', mew=2, ms=10)
+
+    plt.contour(x1, x2, sum([a*b for a,b in zip(legendre_transform([1,x1,x2], degree), models[0][0])]), [0])
+    plt.title('Lambda = 0')
+    plt.xlabel("intensity")
+    plt.ylabel("symmetry")
+    plt.show()
+
+    # plot line weights when lambda = 2
+    for i in range(len(training_data)):
+        if (training_data[i][1] == 1.):
+            plt.plot(training_data[i][0][1], training_data[i][0][2], 'bo', mew=2, ms=10, fillstyle='none', markeredgecolor='blue')
+        else:
+            plt.plot(training_data[i][0][1], training_data[i][0][2], 'rx', mew=2, ms=10)
+
+    plt.contour(x1, x2, sum([a*b for a,b in zip(legendre_transform([1,x1,x2], degree), models[-1][0])]), [0])
+    plt.title('Lambda = 2')
+    plt.xlabel("intensity")
+    plt.ylabel("symmetry")
+    plt.show()
+
+
+
+    # plot optimal weights
+    for i in range(len(training_data)):
+        if (training_data[i][1] == 1.):
+            plt.plot(training_data[i][0][1], training_data[i][0][2], 'bo', mew=2, ms=10, fillstyle='none', markeredgecolor='blue')
+        else:
+            plt.plot(training_data[i][0][1], training_data[i][0][2], 'rx', mew=2, ms=10)
 
     
+    opt = min_index/100
     
-    # plot our optimal weight
-    # xspace = np.linspace(-1, 1, 100)
-    # plt.plot(xspace, formula(w, xspace), color='black', label='Training Separator')
-    # plt.show()
+    plt.title('Optimal lambda = %f' % (opt))
+    plt.xlabel("intensity")
+    plt.ylabel("symmetry")
+    plt.contour(x1, x2, sum([a*b for a,b in zip(legendre_transform([1,x1,x2], degree), opt_model[0])]), [0])
+    plt.show()
+
+    # plot errors vs lambda
+    x_space = np.linspace(0,2,201)
+    plt.plot(x_space, cv_errors, label="cv_error")
+    plt.plot(x_space, test_errors, label="test_error")
+    plt.xlabel('lambda')
+    plt.ylabel('error')
+    plt.legend()
+    plt.show()
+    
+    print("E_out <=", e_out)
