@@ -370,6 +370,9 @@ if __name__ == '__main__':
 
     # calculate classification error
     e_test = float(get_misclassified(opt_model[0], transformed_test_data, len(transformed_test_data)))  / len(transformed_test_data)
+    print(e_test)
+    
+    
     error_bar_test = math.sqrt(1./(2*len(transformed_test_data)) * np.log(2./0.05))
     e_out = e_test + error_bar_test
 
