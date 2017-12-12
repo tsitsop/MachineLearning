@@ -6,16 +6,16 @@ def output_transform(s):
     """
         returns output node transformation
     """
-    # return s
-    return np.tanh(s)
+    return s
+    # return np.tanh(s)
 
 
 def output_transform_prime(s):
     """
         returns derivative of output node transformation
     """
-    # return 1
-    return np.subtract(1, np.square(s))
+    return 1
+    # return np.subtract(1, np.square(s))
 
 
 def theta(s):
@@ -120,9 +120,9 @@ if __name__ == '__main__':
     # 2d np array
     weights = [None]*num_layers
     weights[1] = np.ndarray((3, 2))
-    weights[1].fill(0.25)
+    weights[1].fill(0.2501)
     weights[2] = np.ndarray((3, 1))
-    weights[2].fill(0.25)
+    weights[2].fill(0.2499)
 
     neural_network(data, num_layers, weights)
 

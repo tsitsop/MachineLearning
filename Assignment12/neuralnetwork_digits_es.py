@@ -188,7 +188,6 @@ def forward_propagation(data_point, num_layers, weights):
     """
         data_point is np ndarray of form [1, x1, x2], dimensions (3,1)
     """
-
     x = [None] * num_layers
     s = [None] * num_layers
 
@@ -226,40 +225,54 @@ def backpropagation(data_point, num_layers, weights, x):
     return delta
 
 
+def propagate_and_error(data_point, num_layers, weights, N):
+    x = forward_propagation(data_point[0], num_layers, weights)
+    delta = backpropagation(data_point, num_layers, weights, x)
+
+    error = float(((1/(4*N))*(x[-1]-data_point[1])**2)[0])
+
+    return x, delta, error
+    
+
 def get_error_gradient(data, num_layers, weights):
     error = 0.0
     G = [0]*num_layers
-    
+
     # G[0] empty, initialize the rest
-    for l in range(1, num_layers):
-        G[l] = np.dot(0, weights[l])
+    for layer in range(1, num_layers):
+        G[layer] = np.dot(0, weights[layer])
 
     # calculate the error and gradient
     for data_point in data:
-        x = forward_propagation(data_point[0], num_layers, weights)
-        delta = backpropagation(data_point, num_layers, weights, x)
-
-        error += float(((1/(4*len(data)))*(x[-1]-data_point[1])**2)[0])
+        x, delta, e = propagate_and_error(data_point, num_layers, weights, len(data))
+        error += e
 
         # find gradient for each layer
-        for l in range(1, num_layers):
-            G_l_point = np.dot(x[l-1], np.transpose(delta[l]))
-            G[l] += (1/len(data))*G_l_point
+        for layer in range(1, num_layers):
+            G_l_point = np.dot(x[layer-1], np.transpose(delta[layer]))
+            G[layer] += (1/len(data))*G_l_point
 
     return error, G
 
-def neural_network(data, num_layers, weights, num_iterations, ax):
+
+def neural_network(data, val_data, num_layers, weights, num_iterations, ax):
     N = float(len(data))
     errors = [0.] * num_iterations
     errors[0] = sys.maxsize
     eta = 0.1
     alpha = 1.05
     beta = 0.7
+    no_improvement_ct = 0.0
 
     # find initial weights' gradient, error
     errors[0], gradient = get_error_gradient(data, num_layers, weights)
-    # print(weights)
-    # print()
+    
+    # calculate initial validation error
+    val_error = 0.0
+    for point in val_data:
+        _, _, ve = propagate_and_error(point, num_layers, weights, len(val_data))
+        val_error += ve
+
     # loop to improve weights
     for iteration in range(num_iterations-1):
         # find next potential weights' gradient, error
@@ -272,22 +285,31 @@ def neural_network(data, num_layers, weights, num_iterations, ax):
             eta = alpha*eta
             gradient = potential_gradient
             errors[iteration+1] = potential_error
+
+            # calculate new validation error
+            new_val_error = 0.0
+            for point in val_data:
+                _, _, ve = propagate_and_error(point, num_layers, weights, len(val_data))
+                new_val_error += ve
+
+            if new_val_error < val_error:
+                no_improvement_ct = 0
+            else:
+                no_improvement_ct += 1
+            val_error = new_val_error                
         else:
             errors[iteration+1] = errors[iteration]
             eta = beta*eta
+            no_improvement_ct += 1
+
+        # if haven't improved validation error in 50 iterations, stop early
+        if no_improvement_ct >= 10:
+            break
 
     ax[0].plot(np.arange(num_iterations), errors)
 
     return weights
 
-# determine if point classified correctly
-def goodH(w, point, point_class):
-    result = np.dot(w, point)
-
-    if (np.sign(result) == np.sign(point_class)):
-        return True
-
-    return False
 
 if __name__ == '__main__':
     # get all data from files
@@ -304,7 +326,8 @@ if __name__ == '__main__':
     # normalize ALL data
     normalize_data(data)
 
-    training_data = data[:300]
+    training_data = data[:250]
+    val_data = data[250:300]    
     testing_data = data[300:]
 
     # one hidden layer
@@ -320,7 +343,7 @@ if __name__ == '__main__':
     weights[2].fill(0.1)
 
     f, ax = plt.subplots(2)
-    # plot training data
+    # # plot training data
     # for point in testing_data:
     #     if point[1] == 1:
     #         ax[1].plot(point[0][1], point[0][2], 'bo')
@@ -328,7 +351,7 @@ if __name__ == '__main__':
     #         ax[1].plot(point[0][1], point[0][2], 'rx')
 
     t = time.time()
-    opt_weights = neural_network(training_data, num_layers, weights, 2000000, ax)
+    opt_weights = neural_network(training_data, val_data, num_layers, weights, 100000, ax)
     print("TIME: ", time.time() - t)
 
     # plot decision boundaries
